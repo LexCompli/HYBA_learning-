@@ -1,0 +1,202 @@
+ from flask import Flask, request, jsonify, flash, redirect, url_for
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
+from flask_sqlalchemy import SQLAlchemy
+from functools import wraps
+import os
+import random
+import string
+import spacy
+from azure.cosmos import CosmosClient
+from msal import ConfidentialClientApplication
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+# Initialize Cosmos DB client
+cosmos_client = CosmosClient(app.config["COSMOS_ENDPOINT"], app.config["COSMOS_KEY"])
+database = cosmos_client.get_database(app.config["COSMOS_DATABASE"])
+container = database.get_container(app.config["COSMOS_CONTAINER"])
+
+# Initialize MSAL for Azure AD
+msal_app = ConfidentialClientApplication(
+    app.config["CLIENT_ID"],
+    authority=app.config["AUTHORITY"],
+    client_credential=app.config["CLIENT_SECRET"],
+)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(128), unique=True)
+    password = db.Column(db.String(128))
+    role = db.Column(db.String(128))
+
+class LearningModule(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128))
+    difficulty = db.Column(db.String(128))
+    engagement = db.Column(db.String(128))
+    rating = db.column(db.Float)
+    duration = db.column(db.Integer)
+
+class LearningPathway:
+    def __init__(self, learning_modules):
+        self.learning_modules = learning_modules
+
+    def aigen_pathway(self):
+        chosen_module_indices = random.sample(range(len(self.learning_modules)), len(self.learning_modules))
+        pathway_list = [(i, self.learning_modules[j]) for i, j in enumerate(chosen_module_indices)]
+        return pathway_list
+
+nlp = spacy.load('en_core_web_sm')
+
+matcher = PhraseMatcher(nlp.vocab)
+onboarding_topics = ["onboarding documents", "submit documents", "learning modules"]
+patterns = [nlp(text) for text in onboarding_topics]
+matcher.add("ONBOARDING_TOPICS", patterns)
+
+class Chatbot:
+    def __init__(self, nlp, matcher):
+        self.nlp = nlp
+        self.matcher = matcher
+
+    def response(self, user_message):
+        doc = self.nlp(user_message)
+        matches = self.matcher(doc)
+        for match_id, start, end in matches:
+            span = doc[start:end]
+            if span.text.lower() in ["onboarding documents", "submit documents"]:
+                return "You can upload your documents through the dashboard."
+            elif span.text.lower() == "learning modules":
+                return "You can access your learning modules from the Learning section in your dashboard."
+        return "Sorry, I'm not sure how to respond to that. Can you try asking in a different way?"
+
+@app.route('/login', methods=['POST'])
+def login():
+    if ('email' not in request.json) or ('password' not in request.json):
+        return jsonify({'error': 'Both email and password are required for login'}), 400
+    email = request.json['email']
+    password = request.json['password']
+    user = User.query.filter_by(email=email).first()
+    if user and check_password_hash(user.password, password):
+        access_token = create_access_token(identity=user.id)
+        return jsonify({'access_token': access_token}), 200
+    return jsonify({'error': 'Invalid email or password'}), 401
+
+@app.route('/learning_modules', methods=['GET'])
+def get_learning_modules():
+    return jsonify([{"name": learning_module.name, "difficulty": learning_module.difficulty, "engagement": learning_module.engagement, "rating": learning_module.rating, "duration": learning_module.duration} for learning_module in learning_modules])
+
+@app.route('/create_pathway/<user_id>', methods=['POST'])
+@jwt_required()
+def create_personalized_pathway(user_id):
+    user = User.query.get(user_id)
+    learning_pathway = LearningPathway(learning_modules)
+    pathway_list = learning_pathway.aigen_pathway()
+    return jsonify({'pathway_list': pathway_list})
+
+@app.route('/chatbot', methods=['POST'])
+def chatbot():
+    data = request.json
+    user_message = data['message']
+    chatbot = Chatbot(nlp, matcher)
+    response_message = chatbot.response(user_message)
+    return jsonify({'response': response_message})
+
+if name == 'main':
+    app.run()
+
+from flask import Flask, jsonify, request, make_response
+from flask_jwt_extended import create_access_token
+# ...other imports
+
+@app.route('/login', methods=['POST'])
+def login():
+    # ...your existing login logic
+    # On successful login:
+    access_token = create_access_token(identity=user.id)
+    response = make_response(jsonify({'login': 'success'}), 200)
+    response.set_cookie('access_token', access_token, httponly=True)
+    return response
+
+# Ensure your Flask backend is served over HTTPS in production!
+
+```html
+<template>
+  <div class="learning-modules">
+    <h2>Mis Módulos de Aprendizaje</h2>
+    <div v-if="isLoading" class="loading-message">Cargando...</div>
+    <div v-else>
+      <div v-for="module in learningModules" :key="module.id" class="module-card">
+        <h3>{{ module.name }}</h3>
+        <p>Dificultad: {{ module.difficulty }}</p>
+        <p>Compromiso: {{ module.engagement }}</p>
+        <p>Valoración: {{ module.rating }}</p>
+        <p>Duración: {{ module.duration }} horas</p>
+      </div>
+    </div>
+    <div v-if="error" class="error-message">Error al cargar los módulos.</div>
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      learningModules: [],
+      isLoading: false,
+      error: null
+    };
+  },
+  mounted() {
+    this.fetchLearningModules();
+  },
+  methods: {
+    async fetchLearningModules() {
+      this.isLoading = true;
+      try {
+        const response = await fetch('/learning_modules', {
+          headers: {
+            'Authorization': `Bearer ${tuToken}`
+          }
+        });
+        if (!response.ok) {
+          throw new Error('Fallo al obtener');
+        }
+        const data = await response.json();
+        this.learningModules = data;
+      } catch (error) {
+        console.error('Error al obtener los módulos de aprendizaje:', error);
+        this.error = 'Error al cargar los módulos.';
+      } finally {
+        this.isLoading = false;
+      }
+    }
+  }
+}
+</script>
+
+<style>
+.learning-modules {
+  display: flex;
+  flex-direction: column;
+}
+
+.module-card {
+  margin: 10px;
+  padding: 20px;
+  background-color: #f4f4f4;
+  border-radius: 8px;
+}
+
+.loading-message, .error-message {
+  margin: 10px;
+  padding: 10px;
+  color: #fff;
+  background-color: #f00; /* Red color for error, you can choose a different color */
+  border-radius: 5px;
+}
+</style>
+```
